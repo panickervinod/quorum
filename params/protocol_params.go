@@ -16,7 +16,12 @@
 
 package params
 
-import "math/big"
+import (
+	"github.com/ethereum/go-ethereum/core/types"
+	"math/big"
+)
+
+const QuorumMaximumExtraDataSize uint64 = 65 // Maximum size extra data may be after Genesis.
 
 const (
 	MaximumExtraDataSize  uint64 = 32    // Maximum size extra data may be after Genesis.
@@ -73,3 +78,11 @@ var (
 	MinimumDifficulty      = big.NewInt(131072)                // The minimum that the difficulty may ever be.
 	DurationLimit          = big.NewInt(13)                    // The decision boundary on the blocktime duration used to determine whether difficulty should go up or not.
 )
+
+func GetMaximumExtraDataSize() uint64 {
+	if types.IsQuorum {
+		return QuorumMaximumExtraDataSize
+	} else {
+		return MaximumExtraDataSize
+	}
+}

@@ -30,6 +30,7 @@ import (
 	"github.com/ethereum/go-ethereum/consensus/misc"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 	set "gopkg.in/fatih/set.v0"
 )
@@ -222,8 +223,8 @@ func (ethash *Ethash) VerifyUncles(chain consensus.ChainReader, block *types.Blo
 // See YP section 4.3.4. "Block Header Validity"
 func (ethash *Ethash) verifyHeader(chain consensus.ChainReader, header, parent *types.Header, uncle bool, seal bool) error {
 	// Ensure that the header's extra-data section is of a reasonable size
-	if uint64(len(header.Extra)) > params.MaximumExtraDataSize {
-		return fmt.Errorf("extra-data too long: %d > %d", len(header.Extra), params.MaximumExtraDataSize)
+	if uint64(len(header.Extra)) > params.GetMaximumExtraDataSize() {
+		return fmt.Errorf("extra-data too long: %d > %d", len(header.Extra), params.GetMaximumExtraDataSize())
 	}
 	// Verify the header's timestamp
 	if uncle {
@@ -421,11 +422,18 @@ func (ethash *Ethash) VerifySeal(chain consensus.ChainReader, header *types.Head
 	}
 	digest, result := hashimotoLight(size, cache, header.HashNoNonce().Bytes(), header.Nonce.Uint64())
 	if !bytes.Equal(header.MixDigest[:], digest) {
-		return errInvalidMixDigest
+		if types.IsQuorum {
+			log.Info("invalid mix digest", "calculated", digest, "in header", header.MixDigest[:])
+		} else {
+			return errInvalidMixDigest
+		}
+
 	}
 	target := new(big.Int).Div(maxUint256, header.Difficulty)
 	if new(big.Int).SetBytes(result).Cmp(target) > 0 {
-		return errInvalidPoW
+		if !types.IsQuorum {
+			return errInvalidPoW
+		}
 	}
 	return nil
 }
