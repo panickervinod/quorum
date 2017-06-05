@@ -92,7 +92,7 @@ func (b *EthApiBackend) StateAndHeaderByNumber(ctx context.Context, blockNr rpc.
 	if header == nil || err != nil {
 		return nil, nil, err
 	}
-	stateDb, err := b.eth.BlockChain().StateAt(header.Root)
+	stateDb, _, err := b.eth.BlockChain().StateAt(header.Root)
 	return EthApiState{stateDb}, header, err
 }
 
@@ -115,7 +115,8 @@ func (b *EthApiBackend) GetEVM(ctx context.Context, msg core.Message, state etha
 	vmError := func() error { return nil }
 
 	context := core.NewEVMContext(msg, header, b.eth.BlockChain(), nil)
-	return vm.NewEVM(context, statedb, b.eth.chainConfig, vmCfg), vmError, nil
+	// XXX private state?
+	return vm.NewEVM(context, statedb, nil, b.eth.chainConfig, vmCfg), vmError, nil
 }
 
 func (b *EthApiBackend) SendTx(ctx context.Context, signedTx *types.Transaction) error {
