@@ -240,7 +240,7 @@ func (ethash *Ethash) verifyHeader(chain consensus.ChainReader, header, parent *
 		if header.Time.Cmp(math.MaxBig256) > 0 {
 			return errLargeBlockTime
 		}
-	} else if !types.IsQuorum {
+	} else if !params.IsQuorum {
 		if header.Time.Cmp(big.NewInt(time.Now().Unix())) > 0 {
 			return consensus.ErrFutureBlock
 		}
@@ -447,7 +447,7 @@ func (ethash *Ethash) VerifySeal(chain consensus.ChainReader, header *types.Head
 	}
 	digest, result := hashimotoLight(size, cache, header.HashNoNonce().Bytes(), header.Nonce.Uint64())
 	if !bytes.Equal(header.MixDigest[:], digest) {
-		if types.IsQuorum {
+		if params.IsQuorum {
 			log.Info("invalid mix digest", "calculated", digest, "in header", header.MixDigest[:])
 		} else {
 			return errInvalidMixDigest
@@ -456,7 +456,7 @@ func (ethash *Ethash) VerifySeal(chain consensus.ChainReader, header *types.Head
 	}
 	target := new(big.Int).Div(maxUint256, header.Difficulty)
 	if new(big.Int).SetBytes(result).Cmp(target) > 0 {
-		if !types.IsQuorum {
+		if !params.IsQuorum {
 			return errInvalidPoW
 		}
 	}

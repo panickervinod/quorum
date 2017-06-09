@@ -380,7 +380,9 @@ func (pool *TxPool) validateTx(tx *types.Transaction) error {
 	// Check the transaction doesn't exceed the current
 	// block limit gas.
 	if pool.gasLimit().Cmp(tx.Gas()) < 0 {
-		return ErrGasLimit
+		if !params.IsQuorum {
+			return ErrGasLimit
+		}
 	}
 
 	// Transactions can't be negative. This may never happen
@@ -393,7 +395,7 @@ func (pool *TxPool) validateTx(tx *types.Transaction) error {
 	// Transactor should have enough funds to cover the costs
 	// cost == V + GP * GL
 	if currentState.GetBalance(from).Cmp(tx.Cost()) < 0 {
-		if !types.IsQuorum {
+		if !params.IsQuorum {
 			return ErrInsufficientFunds
 		}
 	}

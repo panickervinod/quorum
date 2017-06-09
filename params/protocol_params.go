@@ -17,11 +17,12 @@
 package params
 
 import (
-	"github.com/ethereum/go-ethereum/core/types"
 	"math/big"
 )
 
 const QuorumMaximumExtraDataSize uint64 = 65 // Maximum size extra data may be after Genesis.
+
+var IsQuorum = true
 
 const (
 	MaximumExtraDataSize  uint64 = 32    // Maximum size extra data may be after Genesis.
@@ -80,7 +81,7 @@ var (
 )
 
 func GetMaximumExtraDataSize() uint64 {
-	if types.IsQuorum {
+	if IsQuorum {
 		return QuorumMaximumExtraDataSize
 	} else {
 		return MaximumExtraDataSize

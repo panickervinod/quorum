@@ -318,7 +318,7 @@ func (bc *BlockChain) GasLimit() *big.Int {
 	bc.mu.RLock()
 	defer bc.mu.RUnlock()
 
-	if types.IsQuorum {
+	if params.IsQuorum {
 		return common.Big0
 	} else {
 		return bc.currentBlock.GasLimit()
