@@ -230,8 +230,10 @@ func (pm *ProtocolManager) Start() {
 func (pm *ProtocolManager) Stop() {
 	log.Info("Stopping Ethereum protocol")
 
-	pm.txSub.Unsubscribe()         // quits txBroadcastLoop
-	pm.minedBlockSub.Unsubscribe() // quits blockBroadcastLoop
+	pm.txSub.Unsubscribe() // quits txBroadcastLoop
+	if !pm.raftMode {
+		pm.minedBlockSub.Unsubscribe() // quits blockBroadcastLoop
+	}
 
 	// Quit the sync loop.
 	// After this send has completed, no new peers will be accepted.

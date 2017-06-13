@@ -140,11 +140,14 @@ func newWorker(config *params.ChainConfig, engine consensus.Engine, coinbase com
 		unconfirmed:    newUnconfirmedBlocks(eth.BlockChain(), 5),
 		fullValidation: false,
 	}
-	worker.events = worker.mux.Subscribe(core.ChainHeadEvent{}, core.ChainSideEvent{}, core.TxPreEvent{})
-	go worker.update()
 
-	go worker.wait()
-	worker.commitNewWork()
+	if !params.IsQuorum {
+		worker.events = worker.mux.Subscribe(core.ChainHeadEvent{}, core.ChainSideEvent{}, core.TxPreEvent{})
+		go worker.update()
+
+		go worker.wait()
+		worker.commitNewWork()
+	}
 
 	return worker
 }

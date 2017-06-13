@@ -359,7 +359,7 @@ func (pool *TxPool) SetLocal(tx *types.Transaction) {
 func (pool *TxPool) validateTx(tx *types.Transaction) error {
 	local := pool.locals.contains(tx.Hash())
 	// Drop transactions under our own minimal accepted gas price
-	if !local && pool.gasPrice.Cmp(tx.GasPrice()) > 0 {
+	if !local && pool.gasPrice.Cmp(tx.GasPrice()) > 0 && !params.IsQuorum {
 		return ErrUnderpriced
 	}
 
@@ -428,7 +428,7 @@ func (pool *TxPool) add(tx *types.Transaction) (bool, error) {
 	// If the transaction pool is full, discard underpriced transactions
 	if uint64(len(pool.all)) >= pool.config.GlobalSlots+pool.config.GlobalQueue {
 		// If the new transaction is underpriced, don't accept it
-		if pool.priced.Underpriced(tx, pool.locals) {
+		if pool.priced.Underpriced(tx, pool.locals) && !params.IsQuorum {
 			log.Trace("Discarding underpriced transaction", "hash", hash, "price", tx.GasPrice())
 			underpricedTxCounter.Inc(1)
 			return false, ErrUnderpriced
@@ -682,14 +682,15 @@ func (pool *TxPool) promoteExecutables(state *state.StateDB, accounts []common.A
 			delete(pool.all, hash)
 			pool.priced.Removed()
 		}
-		// Drop all transactions that are too costly (low balance or out of gas)
-		drops, _ := list.Filter(state.GetBalance(addr), gaslimit)
-		for _, tx := range drops {
-			hash := tx.Hash()
-			// TODO(joel): don't remove low gas Quorum txes
-			delete(pool.all, hash)
-			pool.priced.Removed()
-			queuedNofundsCounter.Inc(1)
+		if !params.IsQuorum {
+			// Drop all transactions that are too costly (low balance or out of gas)
+			drops, _ := list.Filter(state.GetBalance(addr), gaslimit)
+			for _, tx := range drops {
+				hash := tx.Hash()
+				delete(pool.all, hash)
+				pool.priced.Removed()
+				queuedNofundsCounter.Inc(1)
+			}
 		}
 		// Gather all executable transactions and promote them
 		for _, tx := range list.Ready(pool.pendingState.GetNonce(addr)) {
@@ -822,18 +823,20 @@ func (pool *TxPool) demoteUnexecutables(state *state.StateDB) {
 		}
 		// Drop all transactions that are too costly (low balance or out of gas), and queue any invalids back for later
 		drops, invalids := list.Filter(state.GetBalance(addr), gaslimit)
-		for _, tx := range drops {
-			hash := tx.Hash()
-			// TODO(joel): don't remove low gas Quorum txes
-			delete(pool.all, hash)
-			pool.priced.Removed()
-			pendingNofundsCounter.Inc(1)
+		if !params.IsQuorum {
+			for _, tx := range drops {
+				hash := tx.Hash()
+				delete(pool.all, hash)
+				pool.priced.Removed()
+				pendingNofundsCounter.Inc(1)
+			}
+			for _, tx := range invalids {
+				hash := tx.Hash()
+				log.Trace("Demoting pending transaction", "hash", hash)
+				pool.enqueueTx(hash, tx)
+			}
 		}
-		for _, tx := range invalids {
-			hash := tx.Hash()
-			log.Trace("Demoting pending transaction", "hash", hash)
-			pool.enqueueTx(hash, tx)
-		}
+
 		// Delete the entire queue entry if it became empty.
 		if list.Empty() {
 			delete(pool.pending, addr)
