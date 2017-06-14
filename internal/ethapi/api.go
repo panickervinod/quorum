@@ -25,6 +25,7 @@ import (
 	"strings"
 	"time"
 
+	"encoding/json"
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/accounts/keystore"
 	"github.com/ethereum/go-ethereum/common"
@@ -39,10 +40,13 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/p2p"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/ethereum/go-ethereum/private"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/util"
+	"net/http"
+	"sync"
 )
 
 const (
@@ -330,6 +334,16 @@ func (s *PrivateAccountAPI) SendTransaction(ctx context.Context, args SendTxArgs
 		// the same nonce to multiple accounts.
 		s.nonceLock.LockAddr(args.From)
 		defer s.nonceLock.UnlockAddr(args.From)
+	}
+
+	data := []byte(args.Data)
+	isPrivate := len(args.PrivateFor) > 0
+	if isPrivate {
+		data, err = private.P.Send(data, args.PrivateFrom, args.PrivateFor)
+		if err != nil {
+			return common.Hash{}, err
+		}
+		args.Data = data
 	}
 
 	// Set some sanity defaults and terminate on failure
@@ -1119,13 +1133,15 @@ func (s *PublicTransactionPoolAPI) sign(addr common.Address, tx *types.Transacti
 
 // SendTxArgs represents the arguments to sumbit a new transaction into the transaction pool.
 type SendTxArgs struct {
-	From     common.Address  `json:"from"`
-	To       *common.Address `json:"to"`
-	Gas      *hexutil.Big    `json:"gas"`
-	GasPrice *hexutil.Big    `json:"gasPrice"`
-	Value    *hexutil.Big    `json:"value"`
-	Data     hexutil.Bytes   `json:"data"`
-	Nonce    *hexutil.Uint64 `json:"nonce"`
+	From        common.Address  `json:"from"`
+	To          *common.Address `json:"to"`
+	Gas         *hexutil.Big    `json:"gas"`
+	GasPrice    *hexutil.Big    `json:"gasPrice"`
+	Value       *hexutil.Big    `json:"value"`
+	Data        hexutil.Bytes   `json:"data"`
+	Nonce       *hexutil.Uint64 `json:"nonce"`
+	PrivateFrom string          `json:"privateFrom"`
+	PrivateFor  []string        `json:"privateFor"`
 }
 
 // prepareSendTxArgs is a helper function that fills in default values for unspecified tx fields.
@@ -1181,7 +1197,6 @@ func submitTransaction(ctx context.Context, b Backend, tx *types.Transaction) (c
 // SendTransaction creates a transaction for the given argument, sign it and submit it to the
 // transaction pool.
 func (s *PublicTransactionPoolAPI) SendTransaction(ctx context.Context, args SendTxArgs) (common.Hash, error) {
-
 	// Look up the wallet containing the requested signer
 	account := accounts.Account{Address: args.From}
 
@@ -1195,6 +1210,17 @@ func (s *PublicTransactionPoolAPI) SendTransaction(ctx context.Context, args Sen
 		// the same nonce to multiple accounts.
 		s.nonceLock.LockAddr(args.From)
 		defer s.nonceLock.UnlockAddr(args.From)
+	}
+
+	data := []byte(args.Data)
+	isPrivate := len(args.PrivateFor) > 0
+
+	if isPrivate {
+		data, err = private.P.Send(data, args.PrivateFrom, args.PrivateFor)
+		if err != nil {
+			return common.Hash{}, err
+		}
+		args.Data = data
 	}
 
 	// Set some sanity defaults and terminate on failure
@@ -1482,4 +1508,130 @@ func (s *PublicNetAPI) PeerCount() hexutil.Uint {
 // Version returns the current ethereum protocol version.
 func (s *PublicNetAPI) Version() string {
 	return fmt.Sprintf("%d", s.networkVersion)
+}
+
+// Please note: This is a temporary integration to improve performance in high-latency
+// environments when sending many private transactions. It will be removed at a later
+// date when account management is handled outside Ethereum.
+
+type AsyncSendTxArgs struct {
+	SendTxArgs
+	CallbackUrl string `json:"callbackUrl"`
+}
+
+type AsyncResult struct {
+	TxHash common.Hash `json:"txHash"`
+	Error  string      `json:"error"`
+}
+
+type Async struct {
+	sync.Mutex
+	sem chan struct{}
+}
+
+func (a *Async) send(ctx context.Context, s *PublicTransactionPoolAPI, asyncArgs AsyncSendTxArgs) {
+	res := new(AsyncResult)
+	if asyncArgs.CallbackUrl != "" {
+		defer func() {
+			buf := new(bytes.Buffer)
+			err := json.NewEncoder(buf).Encode(res)
+			if err != nil {
+				log.Info("Error encoding callback JSON: %v", err)
+				return
+			}
+			_, err = http.Post(asyncArgs.CallbackUrl, "application/json", buf)
+			if err != nil {
+				log.Info("Error sending callback: %v", err)
+				return
+			}
+		}()
+	}
+	args, err := prepareSendTxArgs(ctx, asyncArgs.SendTxArgs, s.b)
+	if err != nil {
+		log.Info("Async.send: Error doing prepareSendTxArgs: %v", err)
+		res.Error = err.Error()
+		return
+	}
+	b, err := private.P.Send([]byte(args.Data), args.PrivateFrom, args.PrivateFor)
+	if err != nil {
+		log.Info("Error running Private.P.Send: %v", err)
+		res.Error = err.Error()
+		return
+	}
+	res.TxHash, err = a.save(ctx, s, args, b)
+	if err != nil {
+		res.Error = err.Error()
+	}
+}
+
+func (a *Async) save(ctx context.Context, s *PublicTransactionPoolAPI, args SendTxArgs, data []byte) (common.Hash, error) {
+	a.Lock()
+	defer a.Unlock()
+	if args.Nonce == nil {
+		nonce, err := s.b.GetPoolNonce(ctx, args.From)
+		if err != nil {
+			return common.Hash{}, err
+		}
+		args.Nonce = (*hexutil.Uint64)(&nonce)
+	}
+	var tx *types.Transaction
+	if args.To == nil {
+		tx = types.NewContractCreation((uint64)(*args.Nonce), (*big.Int)(args.Value), (*big.Int)(args.Gas), (*big.Int)(args.GasPrice), data)
+	} else {
+		tx = types.NewTransaction((uint64)(*args.Nonce), *args.To, (*big.Int)(args.Value), (*big.Int)(args.Gas), (*big.Int)(args.GasPrice), data)
+	}
+	return common.Hash{}, fmt.Errorf("unimplemented: Async.save %v", tx)
+	//signature, err := s.b.AccountManager().SignEthereum(args.From, tx.SigHash().Bytes())
+	//if err != nil {
+	//	return common.Hash{}, err
+	//}
+	//return submitTransaction(ctx, s.b, tx, signature, len(args.PrivateFor) > 0)
+}
+
+func newAsync(n int) *Async {
+	a := &Async{
+		sem: make(chan struct{}, n),
+	}
+	return a
+}
+
+var async = newAsync(100)
+
+// SendTransactionAsync creates a transaction for the given argument, signs it, and
+// submits it to the transaction pool. This call returns immediately to allow sending
+// many private transactions/bursts of transactions without waiting for the recipient
+// parties to confirm receipt of the encrypted payloads. An optional callbackUrl may
+// be specified--when a transaction is submitted to the transaction pool, it will be
+// called with a POST request containing either {"error": "error message"} or
+// {"txHash": "0x..."}.
+//
+// Please note: This is a temporary integration to improve performance in high-latency
+// environments when sending many private transactions. It will be removed at a later
+// date when account management is handled outside Ethereum.
+func (s *PublicTransactionPoolAPI) SendTransactionAsync(ctx context.Context, args AsyncSendTxArgs) {
+	async.sem <- struct{}{}
+	go func() {
+		async.send(ctx, s, args)
+		<-async.sem
+	}()
+}
+
+// prepareSendTxArgs is a helper function that fills in default values for unspecified tx fields.
+func prepareSendTxArgs(ctx context.Context, args SendTxArgs, b Backend) (SendTxArgs, error) {
+	if args.Gas == nil {
+		gas := big.Int{}
+		gas.SetUint64(defaultGas)
+		args.Gas = (*hexutil.Big)(&gas)
+	}
+	if args.GasPrice == nil {
+		price, err := b.SuggestPrice(ctx)
+		if err != nil {
+			return args, err
+		}
+		args.GasPrice = (*hexutil.Big)(price)
+	}
+	if args.Value == nil {
+		args.Value = (*hexutil.Big)(common.Big0)
+	}
+	return args, nil
 }
