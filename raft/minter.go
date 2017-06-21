@@ -298,7 +298,7 @@ func (minter *minter) mintNewBlock() {
 
 	// commit state root after all state transitions.
 	ethash.AccumulateRewards(work.publicState, header, nil)
-	header.Root = work.publicState.IntermediateRoot(false)
+	header.Root = work.publicState.IntermediateRoot(minter.chain.Config().IsEIP158(work.header.Number))
 
 	// NOTE: < QuorumChain creates a signature here and puts it in header.Extra. >
 
@@ -316,10 +316,11 @@ func (minter *minter) mintNewBlock() {
 
 	log.Info("Generated next block", "block num", block.Number(), "num txes", txCount)
 
-	if _, err := work.publicState.Commit(false); err != nil {
+	deleteEmptyObjects := minter.chain.Config().IsEIP158(block.Number())
+	if _, err := work.publicState.Commit(deleteEmptyObjects); err != nil {
 		panic(fmt.Sprint("error committing public state: ", err))
 	}
-	if _, privStateErr := work.privateState.Commit(false); privStateErr != nil {
+	if _, privStateErr := work.privateState.Commit(deleteEmptyObjects); privStateErr != nil {
 		panic(fmt.Sprint("error committing private state: ", privStateErr))
 	}
 
@@ -328,7 +329,7 @@ func (minter *minter) mintNewBlock() {
 	minter.mux.Post(core.NewMinedBlockEvent{Block: block})
 
 	elapsed := time.Since(time.Unix(0, header.Time.Int64()))
-	log.Info("🔨  Mined block", "number", block.Number(), "hash", block.Hash().Bytes()[:4], "elapsed", elapsed)
+	log.Info("🔨  Mined block", "number", block.Number(), "hash", fmt.Sprintf("%x", block.Hash().Bytes()[:4]), "elapsed", elapsed)
 }
 
 func (env *work) commitTransactions(txes *types.TransactionsByPriceAndNonce, bc *core.BlockChain) (types.Transactions, types.Receipts, types.Receipts, []*types.Log) {

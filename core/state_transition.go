@@ -115,7 +115,7 @@ func IntrinsicGas(data []byte, contractCreation, homestead bool) *big.Int {
 
 // NewStateTransition initialises and returns a new state transition object.
 func NewStateTransition(evm *vm.EVM, msg Message, gp *GasPool) *StateTransition {
-	return &StateTransition{
+	st := &StateTransition{
 		gp:         gp,
 		evm:        evm,
 		msg:        msg,
@@ -125,6 +125,11 @@ func NewStateTransition(evm *vm.EVM, msg Message, gp *GasPool) *StateTransition 
 		data:       msg.Data(),
 		state:      evm.StateDB,
 	}
+
+	if env, ok := evm.(vm.DualStateEnv); ok {
+		st.state = env.PublicState()
+	}
+	return st
 }
 
 // ApplyMessage computes the new state by applying the given message
@@ -228,7 +233,9 @@ func (st *StateTransition) TransitionDb() (ret []byte, requiredGas, usedGas *big
 	var data []byte
 	isPrivate := false
 	publicState := st.state
+	log.Info("transitioning", "msg", msg)
 	if msg, ok := msg.(PrivateMessage); ok && msg.IsPrivate() {
+		log.Info("transitioning", "isprivate", true)
 		isPrivate = true
 		data, err = private.P.Receive(st.data)
 		// Increment the public account nonce if:
@@ -243,6 +250,7 @@ func (st *StateTransition) TransitionDb() (ret []byte, requiredGas, usedGas *big
 			return nil, new(big.Int), new(big.Int), nil
 		}
 	} else {
+		log.Info("transitioning", "isprivate", false)
 		data = st.data
 	}
 

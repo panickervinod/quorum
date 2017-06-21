@@ -19,10 +19,13 @@ package core
 import (
 	"math/big"
 
+	"context"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"
+	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
+	"github.com/ipfs/go-ipfs/core"
 )
 
 // ChainContext supports retrieving headers and consensus parameters from the

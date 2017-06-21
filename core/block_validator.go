@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/core/state"
@@ -35,6 +36,8 @@ type BlockValidator struct {
 	config *params.ChainConfig // Chain configuration options
 	bc     *BlockChain         // Canonical block chain
 	engine consensus.Engine    // Consensus engine used for validating
+
+	enableQuorumChecks bool // indication if the signature and vote count is checked (disabled for testing purposes)
 }
 
 // NewBlockValidator returns a new block validator which is safe for re-use
@@ -82,6 +85,8 @@ func (v *BlockValidator) ValidateBody(block *types.Block) error {
 // transition, such as amount of used gas, the receipt roots and the state root
 // itself. ValidateState returns a database batch if the validation was a success
 // otherwise nil and an error is returned.
+//
+// For quorum it also verifies if the canonical hash in the blocks state points to a valid parent hash.
 func (v *BlockValidator) ValidateState(block, parent *types.Block, statedb *state.StateDB, receipts types.Receipts, usedGas *big.Int) error {
 	header := block.Header()
 	if block.GasUsed().Cmp(usedGas) != 0 {
@@ -104,6 +109,7 @@ func (v *BlockValidator) ValidateState(block, parent *types.Block, statedb *stat
 		return fmt.Errorf("invalid merkle root (remote: %x local: %x)", header.Root, root)
 	}
 
+	// TODO(joel)
 	/*
 		if v.enableQuorumChecks {
 			// Ensure that the parent block was indeed the one that was voted for in the state of this block.
@@ -175,3 +181,24 @@ func CalcGasLimit(parent *types.Block) *big.Int {
 	}
 	return gl
 }
+
+// TODO(joel): Duplicated in internal/ethapi/api.go
+// callmsg is the message type used for call transactions.
+type callmsg struct {
+	addr          common.Address
+	to            *common.Address
+	gas, gasPrice *big.Int
+	value         *big.Int
+	data          []byte
+}
+
+// accessor boilerplate to implement core.Message
+func (m callmsg) From() (common.Address, error)         { return m.addr, nil }
+func (m callmsg) FromFrontier() (common.Address, error) { return m.addr, nil }
+func (m callmsg) Nonce() uint64                         { return 0 }
+func (m callmsg) To() *common.Address                   { return m.to }
+func (m callmsg) GasPrice() *big.Int                    { return m.gasPrice }
+func (m callmsg) Gas() *big.Int                         { return m.gas }
+func (m callmsg) Value() *big.Int                       { return m.value }
+func (m callmsg) Data() []byte                          { return m.data }
+func (m callmsg) CheckNonce() bool                      { return true }

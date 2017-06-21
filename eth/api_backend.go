@@ -97,15 +97,15 @@ func (b *EthApiBackend) StateAndHeaderByNumber(ctx context.Context, blockNr rpc.
 		//block, publicState, privateState := b.eth.blockVoting.Pending()
 		//return EthApiState{publicState, privateState}, block.Header(), nil
 		block, state := b.eth.miner.Pending()
-		return EthApiState{state}, block.Header(), nil
+		return EthApiState{state, state}, block.Header(), nil
 	}
 	// Otherwise resolve the block number and return its state
 	header, err := b.HeaderByNumber(ctx, blockNr)
 	if header == nil || err != nil {
 		return nil, nil, err
 	}
-	stateDb, _, err := b.eth.BlockChain().StateAt(header.Root)
-	return EthApiState{stateDb}, header, err
+	stateDb, privateState, err := b.eth.BlockChain().StateAt(header.Root)
+	return EthApiState{stateDb, privateState}, header, err
 }
 
 func (b *EthApiBackend) GetBlock(ctx context.Context, blockHash common.Hash) (*types.Block, error) {
@@ -121,14 +121,13 @@ func (b *EthApiBackend) GetTd(blockHash common.Hash) *big.Int {
 }
 
 func (b *EthApiBackend) GetEVM(ctx context.Context, msg core.Message, state ethapi.State, header *types.Header, vmCfg vm.Config) (*vm.EVM, func() error, error) {
-	statedb := state.(EthApiState).state
-	from := statedb.GetOrNewStateObject(msg.From())
+	statedb := state.(EthApiState)
+	from := statedb.state.GetOrNewStateObject(msg.From())
 	from.SetBalance(math.MaxBig256)
 	vmError := func() error { return nil }
 
 	context := core.NewEVMContext(msg, header, b.eth.BlockChain(), nil)
-	// XXX private state?
-	return vm.NewEVM(context, statedb, nil, b.eth.chainConfig, vmCfg), vmError, nil
+	return vm.NewEVM(context, statedb.state, statedb.privateState, b.eth.chainConfig, vmCfg), vmError, nil
 }
 
 func (b *EthApiBackend) SendTx(ctx context.Context, signedTx *types.Transaction) error {
@@ -215,7 +214,7 @@ func (b *EthApiBackend) AccountManager() *accounts.Manager {
 }
 
 type EthApiState struct {
-	state *state.StateDB
+	state, privateState *state.StateDB
 }
 
 func (s EthApiState) GetBalance(ctx context.Context, addr common.Address) (*big.Int, error) {

@@ -448,7 +448,7 @@ func (ethash *Ethash) VerifySeal(chain consensus.ChainReader, header *types.Head
 	digest, result := hashimotoLight(size, cache, header.HashNoNonce().Bytes(), header.Nonce.Uint64())
 	if !bytes.Equal(header.MixDigest[:], digest) {
 		if params.IsQuorum {
-			log.Info("invalid mix digest", "calculated", digest, "in header", header.MixDigest[:])
+			log.Info("invalid mix digest", "calculated", fmt.Sprintf("%x", digest), "in header", fmt.Sprintf("%x", header.MixDigest[:]))
 		} else {
 			return errInvalidMixDigest
 		}
